@@ -1,0 +1,236 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 1. Identity & Role
+model User {
+  id             String    @id @default(cuid())
+  email          String    @unique
+  passwordHash   String
+  roleId         String
+  role           Role      @relation(fields: [roleId], references: [id])
+  workspaceId    String
+  workspace      Workspace @relation(fields: [workspaceId], references: [id])
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  lastLogin      DateTime?
+  approvals      Approval[]
+  createdJobs    ContentJob[]
+  auditLogs      AuditLog[]
+}
+
+model Role {
+  id             String       @id @default(cuid())
+  name           String       @unique // SuperAdmin, WorkspaceAdmin, Manager, Approver
+  permissions    Permission[]
+  users          User[]
+}
+
+model Permission {
+  id             String    @id @default(cuid())
+  action         String    // e.g., 'POST:PUBLISH', 'JOB:DELETE', 'LICENSE:MANAGE'
+  roles          Role[]
+}
+
+// 2. Multi-tenant
+model Workspace {
+  id             String    @id @default(cuid())
+  name           String
+  slug           String    @unique
+  branding       Json?     // { logoUrl, primaryColor, faviconUrl }
+  timezone       String    @default("Asia/Ho_Chi_Minh")
+  language       String    @default("vn")
+  users          User[]
+  channels       Channel[]
+  sources        Source[]
+  contentJobs    ContentJob[]
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+// 3. Social Integration
+model Channel {
+  id             String    @id @default(cuid())
+  workspaceId    String
+  workspace      Workspace @relation(fields: [workspaceId], references: [id])
+  provider       String    // 'facebook', 'tiktok'
+  name           String
+  externalId     String    // PageID or TikTok Account ID
+  status         String    @default("active") // active, expired, pending
+  tokens         ChannelToken?
+  contentJobs    ContentJob[]
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([workspaceId, externalId])
+}
+
+model ChannelToken {
+  id                   String    @id @default(cuid())
+  channelId            String    @unique
+  channel              Channel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  encryptedAccessToken String
+  encryptedRefreshToken String?
+  expiresAt            DateTime?
+  scopes               String[]
+}
+
+// 4. Content Domain
+model Source {
+  id             String    @id @default(cuid())
+  workspaceId    String
+  workspace      Workspace @relation(fields: [workspaceId], references: [id])
+  type           String    // 'manual', 'rss', 'webhook', 'url'
+  rawData        Json
+  normalizedData Json?
+  hash           String    @unique // BLM-3 Hash for deduplication
+  jobs           ContentJob[]
+  createdAt      DateTime  @default(now())
+}
+
+model ContentJob {
+  id             String    @id @default(cuid())
+  workspaceId    String
+  workspace      Workspace @relation(fields: [workspaceId], references: [id])
+  sourceId       String?
+  source         Source?   @relation(fields: [sourceId], references: [id])
+  channelId      String
+  channel        Channel   @relation(fields: [channelId], references: [id])
+  creatorId      String
+  creator        User      @relation(fields: [creatorId], references: [id])
+  status         String    @default("draft") // draft, generating, pending_review, approved, rejected, scheduled, published, failed
+  platforms      String[]  // ['facebook', 'tiktok']
+  scheduledAt    DateTime?
+  versions       ContentVersion[]
+  assets         Asset[]
+  approvals      Approval[]
+  publishTasks   PublishTask[]
+  isSample       Boolean   @default(false) // Used for export filtering (Scrub logic)
+  meta           Json?     // Generic metadata for future proofing
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+model ContentVersion {
+  id             String    @id @default(cuid())
+  jobId          String
+  job            ContentJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  scriptContent  String?   @db.Text
+  captions       String?   @db.Text
+  prompts        Json?     // AI creative prompts
+  versionNumber  Int       @default(1)
+  createdAt      DateTime  @default(now())
+}
+
+model Asset {
+  id             String    @id @default(cuid())
+  jobId          String
+  job            ContentJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  s3Key          String
+  url            String
+  fileType       String    // 'image', 'video'
+  metadata       Json?     // { width, height, size }
+  isSample       Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+}
+
+model Approval {
+  id             String    @id @default(cuid())
+  jobId          String
+  job            ContentJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  reviewerId     String
+  reviewer       User      @relation(fields: [reviewerId], references: [id])
+  status         String    // 'approved', 'rejected'
+  note           String?
+  createdAt      DateTime  @default(now())
+}
+
+// 5. Automation Registry
+model WorkflowRegistry {
+  id             String    @id @default(cuid())
+  name           String
+  n8nWorkflowId  String    @unique
+  module         String    // 'content_brief', 'asset_builder', 'publisher'
+  isActive       Boolean   @default(true)
+  metadata       Json?
+  runs           WorkflowRun[]
+}
+
+model WorkflowRun {
+  id                String    @id @default(cuid())
+  workflowId        String
+  workflow          WorkflowRegistry @relation(fields: [workflowId], references: [id])
+  executionId       String    // n8n Execution ID
+  status            String    // running, success, failed
+  duration          Int?      // ms
+  errorLog          String?   @db.Text
+  triggeredByEntity String?   // ContentJob:id
+  createdAt         DateTime  @default(now())
+}
+
+// 6. Commercialization
+model ExportPackage {
+  id             String    @id @default(cuid())
+  version        String
+  status         String    // building, completed, failed
+  artifactKey    String?
+  checksum       String?
+  isWatermarked  Boolean   @default(true)
+  metadata       Json?
+  createdAt      DateTime  @default(now())
+}
+
+model License {
+  id             String    @id @default(cuid())
+  key            String    @unique
+  ownerName      String
+  expiryAt       DateTime?
+  isOnline       Boolean   @default(true)
+  featureFlags   Json?     // { tiktok: true, n8n_worker_count: 5 }
+  machineId      String?
+  createdAt      DateTime  @default(now())
+}
+
+// 7. System & Audit
+model AuditLog {
+  id             String    @id @default(cuid())
+  userId         String?
+  user           User?     @relation(fields: [userId], references: [id])
+  action         String
+  entityType     String
+  entityId       String
+  diff           Json?
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime  @default(now())
+}
+
+model Notification {
+  id             String    @id @default(cuid())
+  workspaceId    String
+  userId         String
+  title          String
+  message        String
+  type           String    // info, success, warning, error
+  isRead         Boolean   @default(false)
+  link           String?
+  createdAt      DateTime  @default(now())
+}
+
+model PublishTask {
+  id             String    @id @default(cuid())
+  jobId          String
+  job            ContentJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  status         String    @default("pending") // pending, processing, success, failed
+  externalPostId String?
+  platform       String
+  errorMessage   String?
+  attempts       Int       @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}

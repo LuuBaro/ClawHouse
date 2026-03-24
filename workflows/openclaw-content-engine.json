@@ -1,0 +1,64 @@
+{
+  "name": "[OPENCLAW] Content Engine Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "trigger-content-gen",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "1",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.OPENCLAW_API_URL }}/generate-content",
+        "authentication": "headerAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "prompt", "value": "={{ $json.prompt }}" },
+            { "name": "source", "value": "={{ $json.sourceText }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "2",
+      "name": "OpenClaw AI Connector",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [450, 300],
+      "credentials": {
+         "headerAuth": { "id": "openclaw-api-key" }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.API_GATEWAY_URL }}/api/v1/callbacks/n8n",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "jobId", "value": "={{ $node[\"Webhook Trigger\"].json[\"jobId\"] }}" },
+            { "name": "aiOutput", "value": "={{ $json[\"output\"] }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "3",
+      "name": "Callback to NestJS API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [650, 300]
+    }
+  ],
+  "connections": {
+    "1": { "main": [ [{ "node": "2", "type": "main", "index": 0 }] ] },
+    "2": { "main": [ [{ "node": "3", "type": "main", "index": 0 }] ] }
+  }
+}

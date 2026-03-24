@@ -1,0 +1,17 @@
+{
+  "name": "@openclaw/shared-types",
+  "version": "1.0.0",
+  "description": "Shared interfaces and schemas for OpenClaw Content House",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc -w"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "zod": "^3.22.0"
+  }
+}
